@@ -1,4 +1,6 @@
+use std::ops::Deref;
 use rayon::prelude::*;
+use itertools::*;
 
 struct AllocatedVectors {
     pub radix_sort_bits_for_i : Vec<bool>,
@@ -26,8 +28,8 @@ pub fn radix_sort(input_array: &mut Vec<u32>, max_value: u32) {
     let mut allocated_vectors = AllocatedVectors::new(input_array.len());
     let nb_bits = log2(max_value).unwrap() + 1;
     for i in 0..nb_bits {
-        for j in 0..input_array.len() {
-            allocated_vectors.radix_sort_bits_for_i[j] = ((input_array[j] >> i) & 1) == 1;
+        for (bit, input_number) in allocated_vectors.radix_sort_bits_for_i.iter_mut().zip(input_array.iter()) {
+            *bit = ((*input_number >> i) & 1) == 1;
         }
         split(&mut allocated_vectors, input_array.as_slice());
         *input_array = allocated_vectors.permute_result.clone();
@@ -53,50 +55,34 @@ fn split(allocated_vectors: &mut AllocatedVectors, input: &[u32]) {
     for e in allocated_vectors.suffix_result.iter_mut() {
         *e = (input.len() as u32 + 1) - *e;
     }
-    /*unsafe {
-        (0..input.len()).into_par_iter().for_each(|i| {
-            if allocated_vectors.radix_sort_bits_for_i[i] {
-                allocated_vectors.split_indexes.get_unchecked_mut(i) = (allocated_vectors.suffix_result[i] - 1) as usize;
-            } else {
-                allocated_vectors.split_indexes[i] = (allocated_vectors.prefix_result[i] - 1) as usize;
-            }
-        });
-    }*/
 
-    unsafe {
-        for i in 0..input.len() {
-            if *allocated_vectors.radix_sort_bits_for_i.get_unchecked(i) {
-                *allocated_vectors.split_indexes.get_unchecked_mut(i) = (allocated_vectors.suffix_result.get_unchecked(i) - 1) as usize;
-            } else {
-                *allocated_vectors.split_indexes.get_unchecked_mut(i) = (allocated_vectors.prefix_result.get_unchecked(i) - 1) as usize;
-            }
+    for (index_to_update, suffix_i, prefix_i, radix_bit) in izip!(allocated_vectors.split_indexes.iter_mut(), allocated_vectors.prefix_result.iter(), allocated_vectors.suffix_result.iter(), allocated_vectors.radix_sort_bits_for_i.iter()) {
+        if *radix_bit {
+            *index_to_update = (*prefix_i - 1) as usize;
+        } else {
+            *index_to_update = (*suffix_i - 1) as usize;
         }
     }
+
+
     permute(allocated_vectors, input);
 }
 
 fn revert(allocated_vectors: &mut AllocatedVectors) {
-    unsafe {
-        for (index, flag) in allocated_vectors.radix_sort_bits_for_i.iter().enumerate() {
-            //allocated_vectors.revert_result[index] = !(*flag);
-            *(allocated_vectors.revert_result.get_unchecked_mut(index)) = !(*flag);
-        }
+    for (to_revert, flag) in allocated_vectors.revert_result.iter_mut().zip(allocated_vectors.radix_sort_bits_for_i.iter()) {
+        *to_revert = !(*flag);
     }
 }
 
 fn prefix(allocated_vectors: &mut AllocatedVectors) {
-    allocated_vectors.prefix_result[0] = match allocated_vectors.revert_result[0] {
-        true => 1,
-        false => 0,
-    };
+    let result_ptr = allocated_vectors.prefix_result.as_mut_ptr();
     unsafe {
-        for i in 1..allocated_vectors.revert_result.len() {
-            /*allocated_vectors.prefix_result[i] = allocated_vectors.prefix_result[i - 1] + match allocated_vectors.revert_result[i] {
-                true => 1,
-                false => 0,
-            };*/
-
-            *(allocated_vectors.prefix_result.get_unchecked_mut(i)) = *(allocated_vectors.prefix_result.get_unchecked(i - 1)) + match allocated_vectors.revert_result.get_unchecked(i) {
+        *(result_ptr.offset(0)) = match allocated_vectors.revert_result[0] {
+            true => 1,
+            false => 0,
+        };
+        for(index, flag) in allocated_vectors.revert_result.iter().enumerate().skip(1) {
+            *(result_ptr.offset(index as isize)) = *(result_ptr.offset((index - 1) as isize)) + match flag {
                 true => 1,
                 false => 0,
             };
@@ -105,14 +91,15 @@ fn prefix(allocated_vectors: &mut AllocatedVectors) {
 }
 
 fn suffix(allocated_vectors: &mut AllocatedVectors) {
+    let result_ptr = allocated_vectors.suffix_result.as_mut_ptr();
     let size = allocated_vectors.radix_sort_bits_for_i.len();
-    allocated_vectors.suffix_result[size - 1] = match allocated_vectors.radix_sort_bits_for_i[size - 1] {
-        true => 1,
-        false => 0,
-    };
     unsafe {
-        for i in (0..(size - 1)).rev() {
-            *allocated_vectors.suffix_result.get_unchecked_mut(i) = allocated_vectors.suffix_result.get_unchecked(i + 1) + match allocated_vectors.radix_sort_bits_for_i.get_unchecked(i) {
+        *(result_ptr.offset((size - 1) as isize)) = match allocated_vectors.radix_sort_bits_for_i[size - 1] {
+            true => 1,
+            false => 0,
+        };
+        for (index, flag) in allocated_vectors.radix_sort_bits_for_i.iter().rev().enumerate().skip(1) {
+            *(result_ptr.offset((size - index - 1) as isize)) = *(result_ptr.offset((size - index) as isize)) + match flag {
                 true => 1,
                 false => 0,
             };
@@ -121,10 +108,10 @@ fn suffix(allocated_vectors: &mut AllocatedVectors) {
 }
 
 fn permute(allocated_vectors: &mut AllocatedVectors, input: &[u32]) {
+    let result_ptr = allocated_vectors.permute_result.as_mut_ptr();
     unsafe {
-        for i in 0..allocated_vectors.permute_result.len() {
-            *(allocated_vectors.permute_result.get_unchecked_mut(*allocated_vectors.split_indexes.get_unchecked(i))) = *input.get_unchecked(i);
-            //allocated_vectors.permute_result[allocated_vectors.split_indexes[i]] = input[i];
+        for (index, input_element) in allocated_vectors.split_indexes.iter().zip(input.iter()) {
+            *(result_ptr.offset(*index as isize)) = *input_element;
         }
     }
 }
@@ -133,9 +120,16 @@ fn permute(allocated_vectors: &mut AllocatedVectors, input: &[u32]) {
 #[cfg(test)]
 mod test {
     #[test]
-    fn test_sorting() {
+    fn test_sorting_course() {
         let mut input = vec![5, 1021, 2, 9, 0, 23, 9, 512, 511, 8];
         super::radix_sort(&mut input, 1021);
         assert_eq!(input, vec![0, 2, 5, 8, 9, 9, 23, 511, 512, 1021]);
+    }
+
+    #[test]
+    fn test_sorting_20() {
+        let mut input = vec![855, 953, 384, 106, 35, 215, 269, 674, 546, 189, 824, 500, 639, 231, 156, 619, 778, 336, 797, 248];
+        super::radix_sort(&mut input, 1000);
+        assert_eq!(input, vec![35, 106, 156, 189, 215, 231, 248, 269, 336, 384, 500, 546, 619, 639, 674, 778, 797, 824, 855, 953]);
     }
 }
