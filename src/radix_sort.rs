@@ -1,3 +1,5 @@
+use rayon::prelude::*;
+
 struct AllocatedVectors {
     pub radix_sort_bits_for_i : Vec<bool>,
     pub split_indexes: Vec<usize>,
@@ -51,19 +53,34 @@ fn split(allocated_vectors: &mut AllocatedVectors, input: &[u32]) {
     for e in allocated_vectors.suffix_result.iter_mut() {
         *e = (input.len() as u32 + 1) - *e;
     }
-    for i in 0..input.len() {
-        if allocated_vectors.radix_sort_bits_for_i[i] {
-            allocated_vectors.split_indexes[i] = (allocated_vectors.suffix_result[i] - 1) as usize;
-        } else {
-            allocated_vectors.split_indexes[i] = (allocated_vectors.prefix_result[i] - 1) as usize;
+    /*unsafe {
+        (0..input.len()).into_par_iter().for_each(|i| {
+            if allocated_vectors.radix_sort_bits_for_i[i] {
+                allocated_vectors.split_indexes.get_unchecked_mut(i) = (allocated_vectors.suffix_result[i] - 1) as usize;
+            } else {
+                allocated_vectors.split_indexes[i] = (allocated_vectors.prefix_result[i] - 1) as usize;
+            }
+        });
+    }*/
+
+    unsafe {
+        for i in 0..input.len() {
+            if *allocated_vectors.radix_sort_bits_for_i.get_unchecked(i) {
+                *allocated_vectors.split_indexes.get_unchecked_mut(i) = (allocated_vectors.suffix_result.get_unchecked(i) - 1) as usize;
+            } else {
+                *allocated_vectors.split_indexes.get_unchecked_mut(i) = (allocated_vectors.prefix_result.get_unchecked(i) - 1) as usize;
+            }
         }
     }
     permute(allocated_vectors, input);
 }
 
 fn revert(allocated_vectors: &mut AllocatedVectors) {
-    for (index, flag) in allocated_vectors.radix_sort_bits_for_i.iter().enumerate() {
-        allocated_vectors.revert_result[index] = !(*flag);
+    unsafe {
+        for (index, flag) in allocated_vectors.radix_sort_bits_for_i.iter().enumerate() {
+            //allocated_vectors.revert_result[index] = !(*flag);
+            *(allocated_vectors.revert_result.get_unchecked_mut(index)) = !(*flag);
+        }
     }
 }
 
@@ -72,11 +89,18 @@ fn prefix(allocated_vectors: &mut AllocatedVectors) {
         true => 1,
         false => 0,
     };
-    for i in 1..allocated_vectors.revert_result.len() {
-        allocated_vectors.prefix_result[i] = allocated_vectors.prefix_result[i - 1] + match allocated_vectors.revert_result[i] {
-            true => 1,
-            false => 0,
-        };
+    unsafe {
+        for i in 1..allocated_vectors.revert_result.len() {
+            /*allocated_vectors.prefix_result[i] = allocated_vectors.prefix_result[i - 1] + match allocated_vectors.revert_result[i] {
+                true => 1,
+                false => 0,
+            };*/
+
+            *(allocated_vectors.prefix_result.get_unchecked_mut(i)) = *(allocated_vectors.prefix_result.get_unchecked(i - 1)) + match allocated_vectors.revert_result.get_unchecked(i) {
+                true => 1,
+                false => 0,
+            };
+        }
     }
 }
 
@@ -86,17 +110,22 @@ fn suffix(allocated_vectors: &mut AllocatedVectors) {
         true => 1,
         false => 0,
     };
-    for i in (0..(size - 1)).rev() {
-        allocated_vectors.suffix_result[i] = allocated_vectors.suffix_result[i + 1] + match allocated_vectors.radix_sort_bits_for_i[i] {
-            true => 1,
-            false => 0,
-        };
+    unsafe {
+        for i in (0..(size - 1)).rev() {
+            *allocated_vectors.suffix_result.get_unchecked_mut(i) = allocated_vectors.suffix_result.get_unchecked(i + 1) + match allocated_vectors.radix_sort_bits_for_i.get_unchecked(i) {
+                true => 1,
+                false => 0,
+            };
+        }
     }
 }
 
 fn permute(allocated_vectors: &mut AllocatedVectors, input: &[u32]) {
-    for i in 0..allocated_vectors.permute_result.len() {
-        allocated_vectors.permute_result[allocated_vectors.split_indexes[i]] = input[i];
+    unsafe {
+        for i in 0..allocated_vectors.permute_result.len() {
+            *(allocated_vectors.permute_result.get_unchecked_mut(*allocated_vectors.split_indexes.get_unchecked(i))) = *input.get_unchecked(i);
+            //allocated_vectors.permute_result[allocated_vectors.split_indexes[i]] = input[i];
+        }
     }
 }
 
