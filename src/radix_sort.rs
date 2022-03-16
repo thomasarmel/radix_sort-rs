@@ -1,11 +1,34 @@
+struct AllocatedVectors {
+    pub radix_sort_bits_for_i : Vec<bool>,
+    pub split_indexes: Vec<usize>,
+    pub revert_result: Vec<bool>,
+    pub prefix_result: Vec<u32>,
+    pub suffix_result: Vec<u32>,
+    pub permute_result: Vec<u32>,
+}
+
+impl AllocatedVectors {
+    pub fn new(size: usize) -> Self {
+        AllocatedVectors {
+            radix_sort_bits_for_i: vec![false; size],
+            split_indexes: vec![0; size],
+            revert_result: vec![false; size],
+            prefix_result: vec![0; size],
+            suffix_result: vec![0; size],
+            permute_result: vec![0; size],
+        }
+    }
+}
+
 pub fn radix_sort(input_array: &mut Vec<u32>, max_value: u32) {
+    let mut allocated_vectors = AllocatedVectors::new(input_array.len());
     let nb_bits = log2(max_value).unwrap() + 1;
     for i in 0..nb_bits {
-        let mut bits_for_i : Vec<bool> = Vec::new();
         for j in 0..input_array.len() {
-            bits_for_i.push(((input_array[j] >> i) & 1) == 1);
+            allocated_vectors.radix_sort_bits_for_i[j] = ((input_array[j] >> i) & 1) == 1;
         }
-        *input_array = split(input_array.as_slice(), bits_for_i.as_slice());
+        split(&mut allocated_vectors, input_array.as_slice());
+        *input_array = allocated_vectors.permute_result.clone();
     }
 }
 
@@ -21,66 +44,69 @@ fn log2(mut x: u32) -> Result<u32, ()> {
     Ok(result)
 }
 
-fn split(input: &[u32], flags: &[bool]) -> Vec<u32> {
-    let mut indexes : Vec<usize> = Vec::new();
-    indexes.resize(input.len(), 0);
-    let ldown = prefix(revert(flags).iter().map(|x| -> u32 {
-        match x {
-            true => 1,
-            false => 0,
-        }
-    }).collect::<Vec<_>>().as_slice());
-    let mut lup = suffix(flags.iter().map(|x| -> u32 {
-        match x {
-            true => 1,
-            false => 0,
-        }
-    }).collect::<Vec<_>>().as_slice());
-    for e in lup.iter_mut() {
+fn split(allocated_vectors: &mut AllocatedVectors, input: &[u32]) {
+    revert(allocated_vectors);
+    prefix(allocated_vectors);
+    suffix(allocated_vectors);
+    for e in allocated_vectors.suffix_result.iter_mut() {
         *e = (input.len() as u32 + 1) - *e;
     }
     for i in 0..input.len() {
-        if flags[i] {
-            indexes[i] = (lup[i] - 1) as usize;
+        if allocated_vectors.radix_sort_bits_for_i[i] {
+            allocated_vectors.split_indexes[i] = (allocated_vectors.suffix_result[i] - 1) as usize;
         } else {
-            indexes[i] = (ldown[i] - 1) as usize;
+            allocated_vectors.split_indexes[i] = (allocated_vectors.prefix_result[i] - 1) as usize;
         }
     }
-    permute(input, indexes.as_slice())
+    permute(allocated_vectors, input);
 }
 
-fn revert(flags: &[bool]) -> Vec<bool> {
-    let mut result = Vec::new();
-    for flag in flags {
-        result.push(!(*flag));
+fn revert(allocated_vectors: &mut AllocatedVectors) {
+    for (index, flag) in allocated_vectors.radix_sort_bits_for_i.iter().enumerate() {
+        allocated_vectors.revert_result[index] = !(*flag);
     }
-    result
 }
 
-fn prefix(input: &[u32]) -> Vec<u32> {
-    let mut result = Vec::new();
-    result.push(input[0]);
-    for i in 1..input.len() {
-        result.push(input[i] + result[i - 1]);
+fn prefix(allocated_vectors: &mut AllocatedVectors) {
+    allocated_vectors.prefix_result[0] = match allocated_vectors.revert_result[0] {
+        true => 1,
+        false => 0,
+    };
+    for i in 1..allocated_vectors.revert_result.len() {
+        allocated_vectors.prefix_result[i] = allocated_vectors.prefix_result[i - 1] + match allocated_vectors.revert_result[i] {
+            true => 1,
+            false => 0,
+        };
     }
-    result
 }
 
-fn suffix(input: &[u32]) -> Vec<u32> {
-    let mut result = Vec::new();
-    result.resize(input.len(), 0);
-    result[input.len() - 1] = input[input.len() - 1];
-    for i in (0..(input.len() - 1)).rev() {
-        result[i] = input[i] + result[i + 1];
+fn suffix(allocated_vectors: &mut AllocatedVectors) {
+    let size = allocated_vectors.radix_sort_bits_for_i.len();
+    allocated_vectors.suffix_result[size - 1] = match allocated_vectors.radix_sort_bits_for_i[size - 1] {
+        true => 1,
+        false => 0,
+    };
+    for i in (0..(size - 1)).rev() {
+        allocated_vectors.suffix_result[i] = allocated_vectors.suffix_result[i + 1] + match allocated_vectors.radix_sort_bits_for_i[i] {
+            true => 1,
+            false => 0,
+        };
     }
-    result
 }
 
-fn permute(input: &[u32], indexes: &[usize]) -> Vec<u32> {
-    let mut result = Vec::new();
-    result.resize(input.len(), 0);
-    for i in 0..result.len() {
-        result[indexes[i]] = input[i];
+fn permute(allocated_vectors: &mut AllocatedVectors, input: &[u32]) {
+    for i in 0..allocated_vectors.permute_result.len() {
+        allocated_vectors.permute_result[allocated_vectors.split_indexes[i]] = input[i];
     }
-    result
+}
+
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn test_sorting() {
+        let mut input = vec![5, 1021, 2, 9, 0, 23, 9, 512, 511, 8];
+        super::radix_sort(&mut input, 1021);
+        assert_eq!(input, vec![0, 2, 5, 8, 9, 9, 23, 511, 512, 1021]);
+    }
 }
