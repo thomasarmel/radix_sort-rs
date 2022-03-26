@@ -12,3 +12,11 @@ itertools = "0.10.3"
 
 [profile.release]
 opt-level = 3
+target-cpu = "native"
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "test_parallel"
+harness = false

@@ -1,4 +1,5 @@
 use itertools::*;
+use rayon::prelude::*;
 
 struct AllocatedVectors {
     pub radix_sort_bits_for_i: Vec<bool>,
@@ -25,9 +26,9 @@ impl AllocatedVectors {
         self.revert();
         self.prefix();
         self.suffix();
-        for e in self.suffix_result.iter_mut() {
+        self.suffix_result.par_iter_mut().for_each(|e| {
             *e = (input.len() as u32 + 1) - *e;
-        }
+        });
 
         for (index_to_update, suffix_i, prefix_i, radix_bit) in izip!(
             self.split_indexes.iter_mut(),
@@ -46,13 +47,11 @@ impl AllocatedVectors {
     }
 
     fn revert(&mut self) {
-        for (to_revert, flag) in self
-            .revert_result
-            .iter_mut()
-            .zip(self.radix_sort_bits_for_i.iter())
-        {
-            *to_revert = !(*flag);
-        }
+        self.revert_result.par_iter_mut().zip(self.radix_sort_bits_for_i.par_iter()).for_each(
+            |(to_revert, flag)| {
+                *to_revert = !(*flag);
+            },
+        );
     }
 
     fn prefix(&mut self) {
@@ -104,13 +103,11 @@ pub fn radix_sort(input_array: &mut Vec<u32>, max_value: u32) {
     let mut allocated_vectors = AllocatedVectors::new(input_array.len());
     let nb_bits = log2(max_value) + 1;
     for i in 0..nb_bits {
-        for (bit, input_number) in allocated_vectors
-            .radix_sort_bits_for_i
-            .iter_mut()
-            .zip(input_array.iter())
-        {
-            *bit = ((*input_number >> i) & 1) == 1;
-        }
+        allocated_vectors.radix_sort_bits_for_i.par_iter_mut().zip(input_array.par_iter()).for_each(
+            |(bit, input_number)| {
+                *bit = ((*input_number >> i) & 1) == 1;
+            },
+        );
         allocated_vectors.split(input_array.as_slice());
         *input_array = allocated_vectors.permute_result.clone();
     }
